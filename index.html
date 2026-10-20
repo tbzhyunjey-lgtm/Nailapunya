@@ -1,0 +1,2033 @@
+```html
+<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal LKPD Interaktif Pancasila - Kebahagiaan Bersama</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        warmbg: '#faf8f5',
+                        brand: {
+                            50: '#fefce8',
+                            100: '#fef9c3',
+                            500: '#eab308',
+                            600: '#ca8a04',
+                            700: '#a16207',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            height: 260px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        @media (min-width: 640px) {
+            .chart-container {
+                height: 300px;
+            }
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .touch-manipulation {
+            touch-action: manipulation;
+        }
+    </style>
+</head>
+<body class="bg-warmbg text-slate-800 font-sans antialiased min-h-screen flex flex-col selection:bg-amber-200 selection:text-slate-900">
+
+    <!-- Top Navigation Header -->
+    <header class="bg-white border-b border-amber-200/80 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex flex-wrap justify-between items-center gap-2 sm:gap-3">
+            <div class="flex items-center space-x-2 sm:space-x-3">
+                <span class="text-2xl sm:text-3xl animate-bounce">🦅</span>
+                <div>
+                    <h1 class="font-bold text-sm sm:text-lg md:text-xl text-slate-900 leading-tight">LKPD Interaktif Pancasila</h1>
+                    <p class="text-[10px] sm:text-xs text-slate-500">Pendidikan Pancasila Kelas VI SD/MI • Kebahagiaan Bersama</p>
+                </div>
+            </div>
+            <nav class="flex flex-wrap gap-1.5 sm:gap-2 text-xs font-medium w-full sm:w-auto justify-end mt-1 sm:mt-0">
+                <button onclick="scrollToSection('alur-pjj')" class="px-2.5 sm:px-3 py-1.5 rounded-xl hover:bg-amber-50 text-slate-700 transition touch-manipulation">
+                    Alur PJJ
+                </button>
+                <button onclick="scrollToSection('lkpd-simulator')" class="px-3 sm:px-3.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-bold hover:bg-amber-600 transition shadow-sm touch-manipulation">
+                    Pengerjaan LKPD
+                </button>
+                <button onclick="accessTeacherDashboard()" class="px-3 sm:px-3.5 py-1.5 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition shadow-sm touch-manipulation flex items-center gap-1">
+                    <span>🔑</span> Dashboard Guru
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pancasila-lkpd-v6';
+        let firebaseConfig = null;
+
+        try {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                firebaseConfig = JSON.parse(__firebase_config);
+            }
+        } catch (e) {
+            console.warn("Firebase config parse fallback:", e);
+        }
+
+        window.db = null;
+        window.auth = null;
+        window.appId = appId;
+        window.firestoreDocs = { setDoc, updateDoc, deleteDoc, doc, collection };
+
+        async function initCloudSync() {
+            if (!firebaseConfig) {
+                console.info("Running in local browser mode.");
+                updateCloudBadgeStatus(false);
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                window.db = getFirestore(app);
+                window.auth = getAuth(app);
+
+                let user;
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    const userCred = await signInWithCustomToken(window.auth, __initial_auth_token);
+                    user = userCred.user;
+                } else {
+                    const userCred = await signInAnonymously(window.auth);
+                    user = userCred.user;
+                }
+
+                if (user) {
+                    subscribeRealtimeSubmissions();
+                    updateCloudBadgeStatus(true);
+                }
+            } catch (err) {
+                console.error("Cloud synchronization error:", err);
+                updateCloudBadgeStatus(false);
+            }
+        }
+
+        function subscribeRealtimeSubmissions() {
+            if (!window.db) return;
+            const colRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'submissions');
+            
+            onSnapshot(colRef, (snapshot) => {
+                const cloudSubmissions = [];
+                snapshot.forEach((docSnap) => {
+                    cloudSubmissions.push({ ...docSnap.data(), id: docSnap.id });
+                });
+
+                cloudSubmissions.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                
+                window.submissions = cloudSubmissions;
+
+                if (typeof window.renderTeacherTable === 'function') {
+                    window.renderTeacherTable();
+                }
+                if (typeof window.updateAnalyticsCharts === 'function') {
+                    window.updateAnalyticsCharts();
+                }
+            }, (error) => {
+                console.error("Firestore onSnapshot error:", error);
+            });
+        }
+
+        function updateCloudBadgeStatus(isOnline) {
+            const badges = [document.getElementById('cloud-sync-badge'), document.getElementById('hero-cloud-badge')];
+            badges.forEach(badge => {
+                if (badge) {
+                    badge.innerHTML = isOnline 
+                        ? `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 🟢 Cloud Realtime Sync`
+                        : `<span class="w-2 h-2 rounded-full bg-amber-400"></span> 🟠 Mode Lokal (Siap Digunakan)`;
+                }
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', initCloudSync);
+    </script>
+
+    <!-- Custom Toast Notification -->
+    <div id="toast-notification" class="fixed top-14 sm:top-16 right-3 sm:right-5 z-50 transform translate-x-full transition-transform duration-300 ease-in-out bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs max-w-xs sm:max-w-sm pointer-events-none">
+        <span id="toast-icon" class="text-lg">✅</span>
+        <span id="toast-message" class="font-medium">Pesan berhasil dikirim!</span>
+    </div>
+
+    <main class="flex-grow max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-8 sm:space-y-12">
+
+        <!-- Hero Banner -->
+        <section class="bg-gradient-to-br from-amber-500 via-amber-600 to-amber-700 rounded-2xl sm:rounded-3xl p-5 sm:p-8 text-white shadow-md relative overflow-hidden">
+            <div class="max-w-3xl space-y-2.5 sm:space-y-4 relative z-10">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="inline-block px-3 py-1 bg-amber-900/40 backdrop-blur-md rounded-full text-[10px] sm:text-xs font-semibold tracking-wide uppercase border border-amber-300/30">
+                        Modul LKPD Digital Pendidikan Pancasila
+                    </span>
+                    <span id="hero-cloud-badge" class="px-2.5 py-0.5 bg-amber-900/40 backdrop-blur-md text-amber-100 font-bold text-[10px] rounded-full border border-amber-300/30 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 🟢 Cloud Realtime Sync
+                    </span>
+                </div>
+                <h2 class="text-xl sm:text-3xl md:text-4xl font-extrabold tracking-tight leading-snug">
+                    Pengamalan Pancasila untuk Kebahagiaan Bersama
+                </h2>
+                <p class="text-amber-100 text-xs sm:text-sm md:text-base leading-relaxed">
+                    Siswa memilih dan mengerjakan 3 dari 5 Sila Pancasila, menyaksikan video pembelajaran interaktif di YouTube, merekam suara/unggah karya, dan mengisi refleksi 5W1H. Hasil jawaban terkirim langsung ke Dashboard Guru secara realtime.
+                </p>
+                <div class="pt-2 flex flex-wrap gap-3">
+                    <button onclick="scrollToSection('lkpd-simulator')" class="px-5 py-2.5 bg-white text-amber-950 font-bold rounded-xl shadow hover:bg-amber-50 transition flex items-center gap-2 text-xs sm:text-sm active:scale-95 touch-manipulation">
+                        <span>▶</span> Mulai Kerjakan LKPD Siswa
+                    </button>
+                    <button onclick="accessTeacherDashboard()" class="px-5 py-2.5 bg-amber-900/50 hover:bg-amber-900/70 text-white font-bold rounded-xl border border-amber-300/40 transition flex items-center gap-2 text-xs sm:text-sm touch-manipulation">
+                        <span>📊</span> Buka Dashboard Guru
+                    </button>
+                </div>
+            </div>
+            <div class="absolute -right-4 -bottom-6 opacity-15 text-8xl sm:text-9xl pointer-events-none font-black hidden sm:block select-none">
+                🇮🇩
+            </div>
+        </section>
+
+        <!-- Section 1: Alur Sistem PJJ -->
+        <section id="alur-pjj" class="bg-white rounded-2xl p-4 sm:p-7 border border-slate-200/80 shadow-sm space-y-4 sm:space-y-6">
+            <div>
+                <span class="text-[11px] sm:text-xs font-bold text-amber-600 uppercase tracking-wider">Petunjuk Siswa</span>
+                <h3 class="text-lg sm:text-2xl font-bold text-slate-900">Alur PJJ Mandiri Tanpa Cetak Kertas</h3>
+                <p class="text-slate-600 text-xs sm:text-sm mt-0.5">
+                    Ikuti 5 langkah sederhana berikut untuk menyelesaikan tugas LKPD Interaktif secara mandiri di HP, tablet, atau laptop.
+                </p>
+            </div>
+
+            <!-- Responsive Step Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                <div class="p-3.5 sm:p-4 rounded-xl border border-indigo-100 bg-indigo-50/50 flex flex-col justify-between hover:border-indigo-300 transition">
+                    <div>
+                        <div class="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs mb-2">1</div>
+                        <h4 class="font-bold text-slate-800 text-xs sm:text-sm">Akses Portal</h4>
+                        <p class="text-[11px] sm:text-xs text-slate-600 mt-1">Buka tautan portal melalui browser HP atau laptop.</p>
+                    </div>
+                    <span class="text-[11px] text-indigo-700 font-semibold mt-2.5 block">🔗 Tanpa Cetak Kertas</span>
+                </div>
+
+                <div class="p-3.5 sm:p-4 rounded-xl border border-blue-100 bg-blue-50/50 flex flex-col justify-between hover:border-blue-300 transition">
+                    <div>
+                        <div class="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs mb-2">2</div>
+                        <h4 class="font-bold text-slate-800 text-xs sm:text-sm">Isi Identitas</h4>
+                        <p class="text-[11px] sm:text-xs text-slate-600 mt-1">Isi Nama Lengkap, Nomor Absen, dan Kelas (VI-A/VI-B).</p>
+                    </div>
+                    <span class="text-[11px] text-blue-700 font-semibold mt-2.5 block">📝 Identitas Siswa</span>
+                </div>
+
+                <div class="p-3.5 sm:p-4 rounded-xl border border-amber-100 bg-amber-50/50 flex flex-col justify-between hover:border-amber-300 transition shadow-sm">
+                    <div>
+                        <div class="w-7 h-7 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold text-xs mb-2">3</div>
+                        <h4 class="font-bold text-slate-800 text-xs sm:text-sm">Pilih 3 Sila</h4>
+                        <p class="text-[11px] sm:text-xs text-slate-600 mt-1">Centang tepat 3 Sila Pancasila yang ingin dikerjakan.</p>
+                    </div>
+                    <span class="text-[11px] text-amber-700 font-semibold mt-2.5 block">🔀 Pilih 3 dari 5 Sila</span>
+                </div>
+
+                <div class="p-3.5 sm:p-4 rounded-xl border border-emerald-100 bg-emerald-50/50 flex flex-col justify-between hover:border-emerald-300 transition">
+                    <div>
+                        <div class="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs mb-2">4</div>
+                        <h4 class="font-bold text-slate-800 text-xs sm:text-sm">Tonton & Jawab</h4>
+                        <p class="text-[11px] sm:text-xs text-slate-600 mt-1">Tonton video YouTube, rekam suara/karya & jawab 5W1H.</p>
+                    </div>
+                    <span class="text-[11px] text-emerald-700 font-semibold mt-2.5 block">🎬 Video YouTube & Refleksi</span>
+                </div>
+
+                <div class="p-3.5 sm:p-4 rounded-xl border border-purple-100 bg-purple-50/50 flex flex-col justify-between hover:border-purple-300 transition sm:col-span-2 lg:col-span-1">
+                    <div>
+                        <div class="w-7 h-7 rounded-lg bg-purple-600 text-white flex items-center justify-center font-bold text-xs mb-2">5</div>
+                        <h4 class="font-bold text-slate-800 text-xs sm:text-sm">Kirim Jawaban</h4>
+                        <p class="text-[11px] sm:text-xs text-slate-600 mt-1">Jawaban otomatis terkirim realtime ke Dashboard Guru.</p>
+                    </div>
+                    <span class="text-[11px] text-purple-700 font-semibold mt-2.5 block">📊 Penilaian Per-Point Guru</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: Lembar Kerja Digital Siswa (LKPD Simulator) -->
+        <section id="lkpd-simulator" class="bg-white rounded-2xl border border-slate-200/90 shadow-md overflow-hidden">
+            <!-- Header Bar -->
+            <div class="bg-slate-900 text-white p-4 sm:p-6 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                    <span class="px-2.5 py-0.5 bg-amber-500 text-slate-950 font-bold text-[10px] sm:text-xs rounded uppercase tracking-wide">
+                        Lembar Kerja Digital Siswa
+                    </span>
+                    <h3 class="text-lg sm:text-2xl font-bold mt-1">LKPD Interaktif Pengamalan Pancasila</h3>
+                    <p class="text-xs text-slate-300 mt-0.5">Lengkapi identitasmu, pilih 3 Sila, tonton videonya di YouTube, dan isi lembar refleksi 5W1H.</p>
+                </div>
+                <div class="bg-slate-800 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 border border-slate-700 w-full sm:w-auto justify-between sm:justify-start">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span id="simulator-status-badge" class="font-medium text-slate-200 text-[11px] sm:text-xs">
+                        Status: Tahap Pemilihan (0/3 Terpilih)
+                    </span>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div class="p-4 sm:p-7 space-y-6 sm:space-y-8">
+                
+                <!-- Step A: Identitas Siswa -->
+                <div class="bg-slate-50/90 rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-3 sm:space-y-4">
+                    <h4 class="font-bold text-slate-900 text-sm sm:text-base flex items-center gap-2">
+                        <span class="w-5 h-5 rounded-full bg-amber-500 text-white text-xs flex items-center justify-center font-bold">A</span>
+                        Identitas Peserta Didik
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 text-xs sm:text-sm">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Lengkap Siswa</label>
+                            <input type="text" id="sim-nama" placeholder="Ketik nama lengkapmu..." class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white text-slate-800 font-medium">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Nomor Absen</label>
+                            <input type="number" id="sim-absen" placeholder="Contoh: 08" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white text-slate-800 font-medium">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Kelas</label>
+                            <select id="sim-kelas" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white text-slate-800 font-medium">
+                                <option value="VI-A">Kelas VI-A</option>
+                                <option value="VI-B">Kelas VI-B</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step B: Checkbox Selection (Select Exactly 3 Tasks) -->
+                <div class="space-y-3 sm:space-y-4">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <h4 class="font-bold text-slate-900 text-sm sm:text-base flex items-center gap-2">
+                            <span class="w-5 h-5 rounded-full bg-amber-500 text-white text-xs flex items-center justify-center font-bold">B</span>
+                            Pilih Tepat 3 Sila Pancasila Yang Ingin Kamu Kerjakan:
+                        </h4>
+                        <span id="selection-counter" class="text-xs font-bold text-amber-900 bg-amber-100 px-3 py-1 rounded-full border border-amber-300">
+                            Terpilih: 0 / 3 Sila
+                        </span>
+                    </div>
+
+                    <!-- 5 Selectable Task Cards -->
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-4">
+                        
+                        <!-- Task 1 -->
+                        <label class="cursor-pointer select-none">
+                            <input type="checkbox" onchange="handleTaskSelection(1)" id="check-task-1" class="hidden peer">
+                            <div class="p-3 sm:p-4 rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-white transition flex flex-col justify-between h-full peer-checked:border-indigo-600 peer-checked:bg-indigo-50/70 hover:border-slate-300 shadow-sm active:scale-95 touch-manipulation">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-bold text-indigo-700 uppercase">Sila 1</span>
+                                    <span class="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-xs font-bold text-indigo-600 bg-white peer-checked:bg-indigo-600 peer-checked:text-white" id="icon-check-1">✓</span>
+                                </div>
+                                <span class="font-bold text-slate-800 text-xs sm:text-sm mt-2 block">Toleransi Beragama</span>
+                                <span class="text-[11px] text-slate-500 mt-1.5 block">🎬 Video YouTube & Refleksi</span>
+                            </div>
+                        </label>
+
+                        <!-- Task 2 -->
+                        <label class="cursor-pointer select-none">
+                            <input type="checkbox" onchange="handleTaskSelection(2)" id="check-task-2" class="hidden peer">
+                            <div class="p-3 sm:p-4 rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-white transition flex flex-col justify-between h-full peer-checked:border-red-600 peer-checked:bg-red-50/70 hover:border-slate-300 shadow-sm active:scale-95 touch-manipulation">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-bold text-red-600 uppercase">Sila 2</span>
+                                    <span class="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-xs font-bold text-red-600 bg-white peer-checked:bg-red-600 peer-checked:text-white" id="icon-check-2">✓</span>
+                                </div>
+                                <span class="font-bold text-slate-800 text-xs sm:text-sm mt-2 block">Kemanusiaan & Anti-Bullying</span>
+                                <span class="text-[11px] text-slate-500 mt-1.5 block">🎬 Video & Voice Note</span>
+                            </div>
+                        </label>
+
+                        <!-- Task 3 -->
+                        <label class="cursor-pointer select-none">
+                            <input type="checkbox" onchange="handleTaskSelection(3)" id="check-task-3" class="hidden peer">
+                            <div class="p-3 sm:p-4 rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-white transition flex flex-col justify-between h-full peer-checked:border-emerald-600 peer-checked:bg-emerald-50/70 hover:border-slate-300 shadow-sm active:scale-95 touch-manipulation">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-bold text-emerald-600 uppercase">Sila 3</span>
+                                    <span class="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-xs font-bold text-emerald-600 bg-white peer-checked:bg-emerald-600 peer-checked:text-white" id="icon-check-3">✓</span>
+                                </div>
+                                <span class="font-bold text-slate-800 text-xs sm:text-sm mt-2 block">Persatuan & Keanekaragaman</span>
+                                <span class="text-[11px] text-slate-500 mt-1.5 block">🎬 Video & Upload Karya</span>
+                            </div>
+                        </label>
+
+                        <!-- Task 4 -->
+                        <label class="cursor-pointer select-none">
+                            <input type="checkbox" onchange="handleTaskSelection(4)" id="check-task-4" class="hidden peer">
+                            <div class="p-3 sm:p-4 rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-white transition flex flex-col justify-between h-full peer-checked:border-orange-600 peer-checked:bg-orange-50/70 hover:border-slate-300 shadow-sm active:scale-95 touch-manipulation">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-bold text-orange-600 uppercase">Sila 4</span>
+                                    <span class="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-xs font-bold text-orange-600 bg-white peer-checked:bg-orange-600 peer-checked:text-white" id="icon-check-4">✓</span>
+                                </div>
+                                <span class="font-bold text-slate-800 text-xs sm:text-sm mt-2 block">Demokrasi Musyawarah</span>
+                                <span class="text-[11px] text-slate-500 mt-1.5 block">📝 Jurnal Refleksi Mandiri</span>
+                            </div>
+                        </label>
+
+                        <!-- Task 5 -->
+                        <label class="cursor-pointer select-none col-span-2 sm:col-span-1">
+                            <input type="checkbox" onchange="handleTaskSelection(5)" id="check-task-5" class="hidden peer">
+                            <div class="p-3 sm:p-4 rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-white transition flex flex-col justify-between h-full peer-checked:border-sky-600 peer-checked:bg-sky-50/70 hover:border-slate-300 shadow-sm active:scale-95 touch-manipulation">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-bold text-sky-600 uppercase">Sila 5</span>
+                                    <span class="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-xs font-bold text-sky-600 bg-white peer-checked:bg-sky-600 peer-checked:text-white" id="icon-check-5">✓</span>
+                                </div>
+                                <span class="font-bold text-slate-800 text-xs sm:text-sm mt-2 block">Gotong Royong Kebersihan</span>
+                                <span class="text-[11px] text-slate-500 mt-1.5 block">🎬 Video & Puisi Karya</span>
+                            </div>
+                        </label>
+
+                    </div>
+                </div>
+
+                <!-- Navigation Tabs for Selected Tasks -->
+                <div id="active-task-tab-bar" class="hidden border-b border-slate-200 pb-2 flex gap-2 overflow-x-auto whitespace-nowrap custom-scrollbar py-1 touch-pan-x">
+                    <!-- Tabs rendered dynamically by JS -->
+                </div>
+
+                <!-- Dynamic Workspace Container -->
+                <div id="dynamic-task-container" class="bg-slate-50/70 rounded-2xl p-3.5 sm:p-6 border border-slate-200 transition-all min-h-[280px] flex items-center justify-center">
+                    
+                    <!-- Empty State Placeholder -->
+                    <div id="placeholder-empty-state" class="text-center py-8 space-y-3">
+                        <span class="text-4xl">📌</span>
+                        <h5 class="font-bold text-slate-700 text-sm sm:text-base">Pilih Tepat 3 Sila Di Atas</h5>
+                        <p class="text-xs text-slate-500 max-w-sm mx-auto">Centang 3 kotak tugas Sila yang ingin kamu kerjakan untuk membuka lembar kerja interaktif beserta tautan videonya.</p>
+                    </div>
+
+                    <!-- TASK 1 CONTENT -->
+                    <div id="content-task-1" class="task-content space-y-5 hidden w-full">
+                        <div class="flex flex-wrap items-center justify-between border-b border-slate-200 pb-2.5 gap-2">
+                            <div>
+                                <span class="px-2 py-0.5 bg-indigo-100 text-indigo-800 font-bold text-xs rounded">TUGAS 1 - SILA 1</span>
+                                <h4 class="text-base sm:text-lg font-bold text-slate-900 mt-1">Toleransi Beragama & Pengamalan Sila Pertama</h4>
+                            </div>
+                            <span class="text-[11px] sm:text-xs text-slate-500">Riri Cerita Anak Interaktif • Kemendikbudristek</span>
+                        </div>
+
+                        <!-- YouTube Video Direct Link Banner Sila 1 -->
+                        <div class="bg-gradient-to-r from-indigo-950 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-indigo-800 shadow-md space-y-3 sm:space-y-4">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <span class="font-bold text-amber-400 text-xs sm:text-sm flex items-center gap-1.5">
+                                    <span>🎬</span> Video Animasi Sila 1: Toleransi Beragama
+                                </span>
+                                <span class="bg-indigo-900/80 text-indigo-200 text-[11px] px-2.5 py-0.5 rounded-full font-semibold border border-indigo-700/50">
+                                    Durasi: ~6 Menit
+                                </span>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 items-center">
+                                <div class="relative rounded-xl overflow-hidden border border-slate-700 shadow">
+                                    <img src="https://img.youtube.com/vi/E5xTl0TtEig/hqdefault.jpg" alt="Video Sila 1" class="w-full h-36 sm:h-40 object-cover">
+                                    <div class="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <span class="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center text-white text-lg shadow-lg">▶</span>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-2 space-y-2.5">
+                                    <h5 class="font-bold text-white text-sm sm:text-base">Riri Cerita Anak Interaktif: Toleransi Beragama</h5>
+                                    <p class="text-xs text-slate-300 leading-relaxed">
+                                        Saksikan cerita Indra, Okto, Donita, Nadia, dan Dek Zahra dalam memahami indahnya sikap saling menghormati dan bertoleransi antarumat beragama saat acara syukuran khitanan Indra.
+                                    </p>
+                                    <a href="https://www.youtube.com/watch?v=E5xTl0TtEig" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition shadow-md touch-manipulation">
+                                        <span>▶️</span> Buka & Tonton Video di YouTube
+                                        <span class="text-[10px] opacity-80">(Di Tab Baru)</span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 5W1H Question Form Sila 1 -->
+                        <div class="bg-indigo-50/70 p-4 sm:p-5 rounded-2xl border border-indigo-100 space-y-4">
+                            <h5 class="font-bold text-indigo-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <span>✍️</span> Lembar Tanggapan Refleksi Video 1 (Format Unsur 5W1H)
+                            </h5>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 text-xs">
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">1. APA (Apa kegiatan yang diadakan oleh keluarga Indra dalam video?)</label>
+                                    <input type="text" id="t1-apa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">2. SIAPA (Siapa saja teman-teman Indra yang hadir dalam acara tersebut?)</label>
+                                    <input type="text" id="t1-siapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">3. DI MANA (Di mana kegiatan syukuran tersebut dilaksanakan?)</label>
+                                    <input type="text" id="t1-dimana" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">4. MENGAPA (Mengapa Okto dan Donita tidak wajib memakai pakaian khusus muslim?)</label>
+                                    <input type="text" id="t1-mengapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div class="md:col-span-2">
+                                    <label class="block font-bold text-slate-800 mb-1">5. BAGAIMANA (Bagaimana caramu menerapkan sikap toleransi beragama di lingkunganmu?)</label>
+                                    <textarea id="t1-bagaimana" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white" placeholder="Ketik jawabanmu di sini..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Table 2.2 Grid -->
+                        <div class="space-y-2.5">
+                            <label class="block font-bold text-xs sm:text-sm text-slate-800">
+                                Tabel 2.2 Refleksi Diri: Pengamalan Sila Ketuhanan Yang Maha Esa
+                            </label>
+                            <div class="overflow-x-auto rounded-xl border border-slate-200">
+                                <table class="w-full text-xs text-left text-slate-700 bg-white min-w-[500px]">
+                                    <thead class="bg-slate-100 text-slate-900 font-bold border-b border-slate-200">
+                                        <tr>
+                                            <th class="p-3">Pernyataan Sikap Sehari-hari</th>
+                                            <th class="p-3 text-center w-20">Jarang</th>
+                                            <th class="p-3 text-center w-24">Kadang</th>
+                                            <th class="p-3 text-center w-20">Sering</th>
+                                            <th class="p-3 text-center w-20">Selalu</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <tr>
+                                            <td class="p-3 font-medium">1. Berdoa sebelum dan sesudah melaksanakan kegiatan belajar.</td>
+                                            <td class="p-3 text-center"><input type="radio" name="s1" value="Jarang"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s1" value="Kadang"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s1" value="Sering"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s1" value="Selalu" checked></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="p-3 font-medium">2. Menghormati teman yang sedang menjalankan ibadah.</td>
+                                            <td class="p-3 text-center"><input type="radio" name="s2" value="Jarang"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s2" value="Kadang"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s2" value="Sering"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s2" value="Selalu" checked></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="p-3 font-medium">3. Tidak mengganggu teman yang berbeda agama saat berdoa.</td>
+                                            <td class="p-3 text-center"><input type="radio" name="s3" value="Jarang"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s3" value="Kadang"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s3" value="Sering"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s3" value="Selalu" checked></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="p-3 font-medium">4. Berteman baik tanpa membeda-bedakan agamanya.</td>
+                                            <td class="p-3 text-center"><input type="radio" name="s4" value="Jarang"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s4" value="Kadang"></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s4" value="Sering" checked></td>
+                                            <td class="p-3 text-center"><input type="radio" name="s4" value="Selalu"></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TASK 2 CONTENT -->
+                    <div id="content-task-2" class="task-content space-y-5 hidden w-full">
+                        <div class="flex flex-wrap items-center justify-between border-b border-slate-200 pb-2.5 gap-2">
+                            <div>
+                                <span class="px-2 py-0.5 bg-red-100 text-red-800 font-bold text-xs rounded">TUGAS 2 - SILA 2</span>
+                                <h4 class="text-base sm:text-lg font-bold text-slate-900 mt-1">Kemanusiaan & Pencegahan Perundungan (Anti-Bullying)</h4>
+                            </div>
+                            <span class="text-[11px] sm:text-xs text-slate-500">Riri Cerita Anak Interaktif • Kemendikbudristek</span>
+                        </div>
+
+                        <!-- Direct YouTube Video Banner Sila 2 -->
+                        <div class="bg-gradient-to-r from-red-950 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-red-800 shadow-md space-y-3 sm:space-y-4">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <span class="font-bold text-red-400 text-xs sm:text-sm flex items-center gap-1.5">
+                                    <span>🎬</span> Video Animasi Sila 2: Anti-Bullying (Perundungan)
+                                </span>
+                                <span class="bg-red-900/70 text-red-200 text-[11px] px-2.5 py-0.5 rounded-full font-semibold border border-red-700/50">
+                                    Durasi: ~8 Menit
+                                </span>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 items-center">
+                                <div class="relative rounded-xl overflow-hidden border border-slate-700 shadow">
+                                    <img src="https://img.youtube.com/vi/rRFKxtMd--E/hqdefault.jpg" alt="Video Sila 2" class="w-full h-36 sm:h-40 object-cover">
+                                    <div class="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <span class="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center text-white text-lg shadow-lg">▶</span>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-2 space-y-2.5">
+                                    <h5 class="font-bold text-white text-sm sm:text-base">Riri Cerita Anak Interaktif: Perundungan</h5>
+                                    <p class="text-xs text-slate-300 leading-relaxed">
+                                        Simak kisah bahaya sikap saling mengejek di sekolah dan pentingnya saling menyayangi sesama teman sesuai nilai Kemanusiaan yang Adil dan Beradab.
+                                    </p>
+                                    <a href="https://www.youtube.com/watch?v=rRFKxtMd--E" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition shadow-md touch-manipulation">
+                                        <span>▶️</span> Buka & Tonton Video di YouTube
+                                        <span class="text-[10px] opacity-80">(Di Tab Baru)</span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 5W1H Question Form for Task 2 -->
+                        <div class="bg-red-50/70 p-4 sm:p-5 rounded-2xl border border-red-100 space-y-4">
+                            <h5 class="font-bold text-red-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <span>✍️</span> Analisis Kemanusiaan Video 2 (Format Unsur 5W1H)
+                            </h5>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 text-xs">
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">1. APA (Apa bentuk ejekan/perundungan yang terjadi dalam video?)</label>
+                                    <input type="text" id="t2-apa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">2. SIAPA (Siapa pelaku ejekan dan siapa teman yang membela korban?)</label>
+                                    <input type="text" id="t2-siapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">3. DI MANA (Di mana lokasi peristiwa ejekan dan pelaporan guru terjadi?)</label>
+                                    <input type="text" id="t2-dimana" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">4. MENGAPA (Mengapa kita dilarang mengejek atau merundung teman?)</label>
+                                    <input type="text" id="t2-mengapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div class="md:col-span-2">
+                                    <label class="block font-bold text-slate-800 mb-1">5. BAGAIMANA (Bagaimana sikap yang benar jika melihat temanmu menjadi korban ejekan?)</label>
+                                    <textarea id="t2-bagaimana" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 bg-white" placeholder="Ketik jawabanmu di sini..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Voice Recorder Component -->
+                        <div class="bg-white p-4 rounded-2xl border border-dashed border-red-300 space-y-3 shadow-sm">
+                            <div class="flex flex-wrap items-center justify-between gap-2.5">
+                                <div>
+                                    <h6 class="font-bold text-xs text-slate-800">Fitur Rekam Suara (Voice Note Refleksi Lisan)</h6>
+                                    <p class="text-[11px] text-slate-500">Siswa dapat merekam tanggapan lisan dari mikrofon HP/Laptop atau mengunggah berkas audio.</p>
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                                    <button onclick="toggleVoiceSim()" id="btn-voice-sim" type="button" class="px-3.5 py-2 bg-red-600 text-white rounded-xl text-xs font-semibold hover:bg-red-700 transition flex items-center gap-1.5 shadow-sm touch-manipulation">
+                                        🎙️ <span id="voice-sim-label">Mulai Merekam Suara</span>
+                                    </button>
+                                    <label class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm cursor-pointer touch-manipulation">
+                                        📁 Upload Audio
+                                        <input type="file" id="t2-audio-file-input" onchange="handleAudioFileUpload(event)" accept="audio/*" class="hidden">
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="voice-audio-preview" class="hidden pt-2 border-t border-slate-100">
+                                <!-- Audio player rendered dynamically -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TASK 3 CONTENT -->
+                    <div id="content-task-3" class="task-content space-y-5 hidden w-full">
+                        <div class="flex flex-wrap items-center justify-between border-b border-slate-200 pb-2.5 gap-2">
+                            <div>
+                                <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold text-xs rounded">TUGAS 3 - SILA 3</span>
+                                <h4 class="text-base sm:text-lg font-bold text-slate-900 mt-1">Persatuan Indonesia & Keanekaragaman Bangsa</h4>
+                            </div>
+                            <span class="text-[11px] sm:text-xs text-slate-500">Si Juki Cerdas Berkarakter • Kemendikbudristek</span>
+                        </div>
+
+                        <!-- YouTube Direct Link Banner Sila 3 -->
+                        <div class="bg-gradient-to-r from-emerald-950 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-emerald-800 shadow-md space-y-3 sm:space-y-4">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <span class="font-bold text-emerald-400 text-xs sm:text-sm flex items-center gap-1.5">
+                                    <span>🎬</span> Video Animasi Sila 3: Persatuan & Kebhinekaan (Nasionalisme)
+                                </span>
+                                <span class="bg-emerald-900/70 text-emerald-200 text-[11px] px-2.5 py-0.5 rounded-full font-semibold border border-emerald-700/50">
+                                    Durasi: ~2 Menit
+                                </span>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 items-center">
+                                <div class="relative rounded-xl overflow-hidden border border-slate-700 shadow">
+                                    <img src="https://img.youtube.com/vi/SCEp7u_WzmA/hqdefault.jpg" alt="Video Sila 3" class="w-full h-36 sm:h-40 object-cover">
+                                    <div class="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <span class="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center text-white text-lg shadow-lg">▶</span>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-2 space-y-2.5">
+                                    <h5 class="font-bold text-white text-sm sm:text-base">Si Juki Cerdas Berkarakter - Nasionalisme</h5>
+                                    <p class="text-xs text-slate-300 leading-relaxed">
+                                        Saksikan penjelasan Si Juki mengenai keberagaman suku, budaya, pakaian daerah, serta pentingnya menjaga persatuan bangsa Indonesia.
+                                    </p>
+                                    <a href="https://www.youtube.com/watch?v=SCEp7u_WzmA" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition shadow-md touch-manipulation">
+                                        <span>▶️</span> Buka & Tonton Video di YouTube
+                                        <span class="text-[10px] opacity-80">(Di Tab Baru)</span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 5W1H Question Form for Task 3 -->
+                        <div class="bg-emerald-50/70 p-4 sm:p-5 rounded-2xl border border-emerald-100 space-y-4">
+                            <h5 class="font-bold text-emerald-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <span>✍️</span> Tanggapan Refleksi Video 3 (Format Unsur 5W1H)
+                            </h5>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 text-xs">
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">1. APA (Apa kekayaan bangsa Indonesia yang dijelaskan Si Juki?)</label>
+                                    <input type="text" id="t3-apa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">2. SIAPA (Siapa pemuda-pemudi pencetus semangat persatuan pada tahun 1928?)</label>
+                                    <input type="text" id="t3-siapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">3. DI MANA (Di mana keanekaragaman suku bangsa tersebut berada?)</label>
+                                    <input type="text" id="t3-dimana" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">4. MENGAPA (Mengapa perbedaan suku dan budaya adalah kekayaan, bukan perpecahan?)</label>
+                                    <input type="text" id="t3-mengapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div class="md:col-span-2">
+                                    <label class="block font-bold text-slate-800 mb-1">5. BAGAIMANA (Bagaimana caramu menjaga kerukunan dengan teman dari suku lain?)</label>
+                                    <textarea id="t3-bagaimana" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white" placeholder="Ketik jawabanmu di sini..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Upload Photo / Poster File Block -->
+                        <div class="space-y-2">
+                            <label class="block font-bold text-xs sm:text-sm text-slate-800">Unggah Foto Komik/Poster Persatuan Karya Siswa:</label>
+                            <input type="file" id="t3-file-input" onchange="handleFileUpload(event, 3)" accept="image/*,.pdf" class="hidden">
+                            <div onclick="document.getElementById('t3-file-input').click()" class="border-2 border-dashed border-emerald-300 bg-emerald-50/60 rounded-2xl p-4 sm:p-5 text-center cursor-pointer hover:bg-emerald-50 transition shadow-sm touch-manipulation">
+                                <span class="text-3xl">🖼️</span>
+                                <p class="text-xs font-bold text-slate-800 mt-1" id="file-upload-label-3">Klik untuk Upload Foto Poster / Gambar Persatuan</p>
+                                <p class="text-[10px] text-slate-500 mt-0.5">Format JPG, PNG, atau PDF (Maksimal 10MB)</p>
+                            </div>
+                            <div id="file-preview-container-3" class="hidden mt-2 p-2 bg-white rounded-xl border border-emerald-200">
+                                <img id="file-preview-img-3" class="max-h-48 rounded-lg mx-auto shadow-sm" alt="Preview Karya">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TASK 4 CONTENT -->
+                    <div id="content-task-4" class="task-content space-y-5 hidden w-full">
+                        <div class="flex flex-wrap items-center justify-between border-b border-slate-200 pb-2.5 gap-2">
+                            <div>
+                                <span class="px-2 py-0.5 bg-orange-100 text-orange-800 font-bold text-xs rounded">TUGAS 4 - SILA 4</span>
+                                <h4 class="text-base sm:text-lg font-bold text-slate-900 mt-1">Musyawarah Mufakat: Pemilihan Ketua Kelas</h4>
+                            </div>
+                            <span class="text-[11px] sm:text-xs text-slate-500">Jurnal Refleksi Mandiri Pengalaman Nyata</span>
+                        </div>
+
+                        <!-- Notice Banner Sila 4 -->
+                        <div class="bg-gradient-to-r from-orange-950 via-amber-900 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-orange-800 shadow-md space-y-2">
+                            <div class="flex items-center gap-2 text-amber-300 font-bold text-xs sm:text-sm">
+                                <span>🗳️</span>
+                                <h5>Jurnal Refleksi Mandiri Musyawarah Kelas</h5>
+                            </div>
+                            <p class="text-xs text-orange-100 leading-relaxed">
+                                Pada Tugas 4 ini, kamu tidak perlu menonton video. Ingat kembali pengalaman nyatamu saat mengikuti acara <strong>Pemilihan Ketua Kelas</strong> di sekolahmu, lalu jawab pertanyaan refleksi 5W1H berikut.
+                            </p>
+                        </div>
+
+                        <!-- 5W1H Question Form for Task 4 -->
+                        <div class="bg-orange-50/70 p-4 sm:p-5 rounded-2xl border border-orange-100 space-y-4">
+                            <h5 class="font-bold text-orange-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <span>✍️</span> Jurnal Refleksi Musyawarah Pemilihan Ketua Kelas (Format 5W1H)
+                            </h5>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 text-xs">
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">1. APA (Apa hasil musyawarah pemilihan ketua kelas di kelasmu?)</label>
+                                    <input type="text" id="t4-apa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-orange-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">2. SIAPA (Siapa saja calon yang maju dan siapa yang akhirnya terpilih?)</label>
+                                    <input type="text" id="t4-siapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-orange-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">3. DI MANA (Di mana proses pemungutan suara musyawarah tersebut dilakukan?)</label>
+                                    <input type="text" id="t4-dimana" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-orange-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">4. MENGAPA (Mengapa kita harus menerima hasil musyawarah dengan lapang dada?)</label>
+                                    <input type="text" id="t4-mengapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-orange-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div class="md:col-span-2">
+                                    <label class="block font-bold text-slate-800 mb-1">5. BAGAIMANA (Bagaimana sikapmu seandainya calon pilihanmu tidak terpilih?)</label>
+                                    <textarea id="t4-bagaimana" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-orange-500 bg-white" placeholder="Ketik jawabanmu di sini..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TASK 5 CONTENT -->
+                    <div id="content-task-5" class="task-content space-y-5 hidden w-full">
+                        <div class="flex flex-wrap items-center justify-between border-b border-slate-200 pb-2.5 gap-2">
+                            <div>
+                                <span class="px-2 py-0.5 bg-sky-100 text-sky-800 font-bold text-xs rounded">TUGAS 5 - SILA 5</span>
+                                <h4 class="text-base sm:text-lg font-bold text-slate-900 mt-1">Gotong Royong & Keadilan Sosial (Kerja Bakti)</h4>
+                            </div>
+                            <span class="text-[11px] sm:text-xs text-slate-500">Adit Sopo Jarwo • MD Animation / Kemendikbud</span>
+                        </div>
+
+                        <!-- Direct YouTube Video Banner Sila 5 -->
+                        <div class="bg-gradient-to-r from-sky-950 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border border-sky-800 shadow-md space-y-3 sm:space-y-4">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <span class="font-bold text-sky-400 text-xs sm:text-sm flex items-center gap-1.5">
+                                    <span>🎬</span> Video Animasi Sila 5: Gotong Royong Kebersihan
+                                </span>
+                                <span class="bg-sky-900/70 text-sky-200 text-[11px] px-2.5 py-0.5 rounded-full font-semibold border border-sky-700/50">
+                                    Durasi: ~7 Menit
+                                </span>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 items-center">
+                                <div class="relative rounded-xl overflow-hidden border border-slate-700 shadow">
+                                    <img src="https://img.youtube.com/vi/lP0us35EU_s/hqdefault.jpg" alt="Video Sila 5" class="w-full h-36 sm:h-40 object-cover">
+                                    <div class="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <span class="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center text-white text-lg shadow-lg">▶</span>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-2 space-y-2.5">
+                                    <h5 class="font-bold text-white text-sm sm:text-base">Adit Sopo Jarwo - Gotong Royong Kerja Bakti</h5>
+                                    <p class="text-xs text-slate-300 leading-relaxed">
+                                        Saksikan petualangan Adit, Denis, Bang Jarwo, Sopo, dan warga desa dalam bergotong royong membersihkan lingkungan kampung demi kebahagiaan bersama.
+                                    </p>
+                                    <a href="https://www.youtube.com/watch?v=lP0us35EU_s" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition shadow-md touch-manipulation">
+                                        <span>▶️</span> Buka & Tonton Video di YouTube
+                                        <span class="text-[10px] opacity-80">(Di Tab Baru)</span>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 5W1H Question Form for Task 5 -->
+                        <div class="bg-sky-50/70 p-4 sm:p-5 rounded-2xl border border-sky-100 space-y-4">
+                            <h5 class="font-bold text-sky-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <span>✍️</span> Analisis Gotong Royong Video 5 (Format Unsur 5W1H)
+                            </h5>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 text-xs">
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">1. APA (Apa kegiatan kerja bakti yang diumumkan dalam video?)</label>
+                                    <input type="text" id="t5-apa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">2. SIAPA (Siapa saja tokoh dan warga yang ikut bergotong royong?)</label>
+                                    <input type="text" id="t5-siapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">3. DI MANA (Di mana lokasi kerja bakti kebersihan dilaksanakan?)</label>
+                                    <input type="text" id="t5-dimana" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div>
+                                    <label class="block font-bold text-slate-800 mb-1">4. MENGAPA (Mengapa gotong royong dapat pekerjaan berat menjadi ringan?)</label>
+                                    <input type="text" id="t5-mengapa" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 bg-white" placeholder="Ketik jawabanmu di sini...">
+                                </div>
+
+                                <div class="md:col-span-2">
+                                    <label class="block font-bold text-slate-800 mb-1">5. BAGAIMANA (Bagaimana caramu bergotong royong menjaga kebersihan kelas/rumah?)</label>
+                                    <textarea id="t5-bagaimana" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 bg-white" placeholder="Ketik jawabanmu di sini..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Creative Poem/Story Field -->
+                        <div class="space-y-2">
+                            <label class="block font-bold text-xs sm:text-sm text-slate-800">Karya Tulis Siswa (Puisi / Pantun / Cerita Gotong Royong):</label>
+                            <textarea id="t5-karya" rows="3" class="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 bg-white text-xs text-slate-800" placeholder="Ketik karya puisi, pantun, atau ceritamu di sini..."></textarea>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Action Submit Row -->
+                <div class="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <p id="submit-guidance-text" class="text-xs text-slate-500 text-center sm:text-left">
+                        *Silahkan centang 3 Sila untuk membuka lembar kerja interaktif.
+                    </p>
+                    <button id="btn-submit-lkpd" onclick="submitLKPD()" disabled type="button" class="px-6 py-3.5 bg-slate-300 text-slate-500 font-bold rounded-xl cursor-not-allowed transition flex items-center gap-2 text-xs sm:text-sm shadow-none w-full sm:w-auto justify-center touch-manipulation">
+                        <span>📤</span> Kirim Jawaban 3 Sila Ke Guru
+                    </button>
+                </div>
+
+                <!-- Student Confirmation Receipt Box (Pure confirmation - NO grades shown here) -->
+                <div id="submission-result" class="hidden bg-emerald-50 rounded-2xl p-4 sm:p-6 border border-emerald-300 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-200 pb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">🎉</span>
+                            <div>
+                                <h5 class="font-extrabold text-emerald-950 text-sm sm:text-base">Jawaban LKPD Berhasil Terkirim!</h5>
+                                <p class="text-xs text-emerald-800" id="sim-timestamp">Waktu Kirim: --:-- WIB</p>
+                            </div>
+                        </div>
+                        <span class="px-3 py-1 bg-emerald-200 text-emerald-900 font-bold text-xs rounded-full border border-emerald-300">
+                            Status: Menunggu Pemeriksaan Guru
+                        </span>
+                    </div>
+
+                    <!-- Receipt Summary Body -->
+                    <div id="result-summary" class="text-xs text-slate-800 space-y-3">
+                        <!-- Populated dynamically by JS -->
+                    </div>
+
+                    <div class="bg-white/80 p-3 rounded-xl border border-emerald-200 text-[11px] text-emerald-900 flex flex-wrap items-center justify-between gap-2">
+                        <span>ℹ️ Jawabanmu telah tersimpan secara realtime di database. Guru dapat memeriksa dan memberikan nilai per-point melalui Dashboard Guru.</span>
+                        <button onclick="accessTeacherDashboard()" type="button" class="px-3 py-1 bg-emerald-700 text-white font-bold rounded-lg hover:bg-emerald-800 transition">
+                            Lihat Dashboard Guru
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- Section 3: Dashboard Analytics Guru & Penilaian Siswa (STRICTLY HIDDEN BY DEFAULT) -->
+        <section id="analytics-dashboard" class="hidden bg-white rounded-2xl p-4 sm:p-7 border border-slate-200/90 shadow-md space-y-6">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-[10px] sm:text-xs font-bold text-amber-600 uppercase tracking-wider">Fitur Evaluasi & Penilaian Guru</span>
+                        <span id="pin-status-badge" class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold text-[10px] rounded-full border border-emerald-300">🔓 Terbuka</span>
+                        <span id="cloud-sync-badge" class="px-2.5 py-0.5 bg-slate-100 text-slate-700 font-bold text-[10px] rounded-full border border-slate-300 flex items-center gap-1.5">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 🟢 Cloud Realtime Sync
+                        </span>
+                    </div>
+                    <h3 class="text-lg sm:text-2xl font-bold text-slate-900">Dashboard Hasil Pengerjaan & Penilaian Per-Point</h3>
+                    <p class="text-slate-600 text-xs sm:text-sm mt-0.5">
+                        Periksa jawaban 5W1H siswa, dengarkan rekaman suara, lihat gambar karya, berikan nilai per-point, dan hapus jawaban ganda.
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-2 w-full sm:w-auto">
+                    <button onclick="switchTeacherDashboardTab('submisi')" id="btn-tab-submisi" type="button" class="px-3.5 py-2 bg-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-sm transition touch-manipulation flex-1 sm:flex-none text-center">
+                        📝 Daftar Submisi & Penilaian (<span id="submission-count-badge">0</span>)
+                    </button>
+                    <button onclick="switchTeacherDashboardTab('grafik')" id="btn-tab-grafik" type="button" class="px-3.5 py-2 bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-200 transition touch-manipulation flex-1 sm:flex-none text-center">
+                        📊 Analisis & Grafik
+                    </button>
+                    <button onclick="lockTeacherDashboard()" type="button" title="Kunci Kembali Dashboard" class="px-3 py-2 bg-red-100 text-red-700 font-bold text-xs rounded-xl hover:bg-red-200 transition touch-manipulation flex items-center gap-1">
+                        🔒 Kunci
+                    </button>
+                </div>
+            </div>
+
+            <!-- TAB 1: SUBMISI & PENILAIAN PER-POINT (DEFAULT) -->
+            <div id="teacher-view-submisi" class="space-y-5">
+                <!-- Summary Stats Bar -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
+                    <div class="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-200 flex items-center gap-2.5 sm:gap-3">
+                        <span class="text-2xl sm:text-3xl">📥</span>
+                        <div>
+                            <span class="text-[10px] sm:text-xs font-semibold text-slate-500 block">Total Submisi</span>
+                            <span class="text-base sm:text-lg font-extrabold text-slate-900" id="stat-total-submisi">0 Siswa</span>
+                        </div>
+                    </div>
+                    <div class="bg-amber-50 p-3 sm:p-4 rounded-xl border border-amber-200 flex items-center gap-2.5 sm:gap-3">
+                        <span class="text-2xl sm:text-3xl">⏳</span>
+                        <div>
+                            <span class="text-[10px] sm:text-xs font-semibold text-amber-800 block">Belum Dinilai</span>
+                            <span class="text-base sm:text-lg font-extrabold text-amber-900" id="stat-pending-submisi">0 Siswa</span>
+                        </div>
+                    </div>
+                    <div class="bg-emerald-50 p-3 sm:p-4 rounded-xl border border-emerald-200 flex items-center gap-2.5 sm:gap-3">
+                        <span class="text-2xl sm:text-3xl">✅</span>
+                        <div>
+                            <span class="text-[10px] sm:text-xs font-semibold text-emerald-800 block">Selesai Dinilai</span>
+                            <span class="text-base sm:text-lg font-extrabold text-emerald-900" id="stat-completed-submisi">0 Siswa</span>
+                        </div>
+                    </div>
+                    <div class="bg-indigo-50 p-3 sm:p-4 rounded-xl border border-indigo-200 flex items-center gap-2.5 sm:gap-3">
+                        <span class="text-2xl sm:text-3xl">⭐</span>
+                        <div>
+                            <span class="text-[10px] sm:text-xs font-semibold text-indigo-800 block">Rata-Rata Nilai</span>
+                            <span class="text-base sm:text-lg font-extrabold text-indigo-900" id="stat-avg-score">0.0 / 100</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Student Submissions Table Container -->
+                <div class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm custom-scrollbar">
+                    <table class="w-full text-xs text-left text-slate-700 bg-white min-w-[700px]">
+                        <thead class="bg-slate-900 text-white font-bold">
+                            <tr>
+                                <th class="p-3 sm:p-3.5">ID & Waktu</th>
+                                <th class="p-3 sm:p-3.5">Nama Siswa</th>
+                                <th class="p-3 sm:p-3.5">Kelas & Absen</th>
+                                <th class="p-3 sm:p-3.5">Sila Terpilih</th>
+                                <th class="p-3 sm:p-3.5">Lampiran Media</th>
+                                <th class="p-3 sm:p-3.5 text-center">Status & Nilai</th>
+                                <th class="p-3 sm:p-3.5 text-center">Aksi Guru</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-submissions-body" class="divide-y divide-slate-100">
+                            <!-- Dynamically populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 2: GRAFIK & ANALISIS STATISTIK -->
+            <div id="teacher-view-grafik" class="hidden space-y-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <!-- Chart 1 -->
+                    <div class="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                        <div>
+                            <h4 class="font-bold text-slate-800 text-xs sm:text-sm">Persentase Pemilihan Tiap Sila (3 Sila Terpilih)</h4>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Memantau Sila mana yang paling banyak dipilih siswa</p>
+                        </div>
+                        <div class="chart-container my-3">
+                            <canvas id="chart-task-distribution"></canvas>
+                        </div>
+                        <p class="text-[11px] text-slate-500 text-center">Rekapitulasi persentase pilihan tugas siswa secara real-time.</p>
+                    </div>
+
+                    <!-- Chart 2 -->
+                    <div class="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                        <div>
+                            <h4 class="font-bold text-slate-800 text-xs sm:text-sm">Hasil Refleksi Kebiasaan Sila Pertama (Tabel 2.2)</h4>
+                            <p class="text-[11px] text-slate-500 mt-0.5">Rekapitulasi kebiasaan berdoa & toleransi siswa</p>
+                        </div>
+                        <div class="chart-container my-3">
+                            <canvas id="chart-reflection-matrix"></canvas>
+                        </div>
+                        <p class="text-[11px] text-slate-500 text-center">Grafik distribusi pilihan refleksi kebiasaan sehari-hari siswa.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- MODAL PENILAIAN PER-POINT SISWA (ACCESSIBLE ONLY FROM DASHBOARD GURU) -->
+        <div id="modal-grading" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+            <div class="bg-white rounded-2xl sm:rounded-3xl max-w-4xl w-full max-h-[92vh] overflow-y-auto custom-scrollbar shadow-2xl border border-slate-200 flex flex-col my-auto">
+                
+                <!-- Modal Header -->
+                <div class="bg-slate-900 text-white p-4 sm:p-5 sticky top-0 z-20 flex justify-between items-center rounded-t-2xl sm:rounded-t-3xl border-b border-slate-800">
+                    <div>
+                        <span class="px-2.5 py-0.5 bg-amber-500 text-slate-950 font-bold text-[10px] rounded uppercase tracking-wider">
+                            Formulir Penilaian Guru
+                        </span>
+                        <h4 class="text-sm sm:text-lg font-bold mt-1" id="modal-student-name">Lembar Penilaian Siswa</h4>
+                        <p class="text-[11px] sm:text-xs text-slate-300" id="modal-student-meta">Kelas VI-A • Absen 03 • ID: SUB-001</p>
+                    </div>
+                    <button onclick="closeGradingModal()" type="button" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold text-base flex items-center justify-center transition touch-manipulation">✕</button>
+                </div>
+
+                <!-- Modal Content (Per-Point Evaluation Fields) -->
+                <div class="p-4 sm:p-6 space-y-5 text-xs flex-grow" id="modal-grading-content">
+                    <!-- Filled dynamically by JS -->
+                </div>
+
+                <!-- Modal Footer Score Summary & Action -->
+                <div class="p-3.5 sm:p-5 bg-slate-100 border-t border-slate-200 sticky bottom-0 z-20 flex flex-wrap justify-between items-center gap-3 rounded-b-2xl sm:rounded-b-3xl">
+                    <div class="flex items-center gap-3">
+                        <div class="text-left">
+                            <span class="text-[10px] sm:text-xs font-semibold text-slate-500 block">Total Akumulasi Nilai:</span>
+                            <div class="flex items-baseline gap-1.5 sm:gap-2">
+                                <span class="text-xl sm:text-2xl font-black text-emerald-600" id="modal-calculated-score">100</span>
+                                <span class="text-xs font-bold text-slate-500">/ 100 Poin</span>
+                                <span id="modal-score-predicate" class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold text-[10px] rounded-md">A (Sangat Baik)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2 w-full sm:w-auto justify-end">
+                        <button onclick="closeGradingModal()" type="button" class="px-3.5 py-2 sm:px-4 sm:py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition text-xs">
+                            Batal
+                        </button>
+                        <button onclick="saveStudentGrade()" type="button" class="px-5 py-2 sm:px-6 sm:py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs touch-manipulation">
+                            <span>💾</span> Simpan Penilaian & Catatan Guru
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- MODAL PERBESAR GAMBAR KARYA SISWA -->
+        <div id="modal-image-zoom" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-5" onclick="closeImageZoom()">
+            <div class="max-w-3xl w-full text-center space-y-3" onclick="event.stopPropagation()">
+                <div class="flex justify-between items-center text-white pb-2 border-b border-slate-800">
+                    <h5 class="font-bold text-xs sm:text-sm" id="zoom-title">Gambar Karya Siswa</h5>
+                    <button onclick="closeImageZoom()" type="button" class="text-slate-400 hover:text-white font-bold text-base sm:text-lg">✕ Close</button>
+                </div>
+                <img id="zoom-image-src" src="" alt="Perbesar Karya" class="max-h-[75vh] max-w-full rounded-xl mx-auto shadow-2xl border border-slate-700 object-contain">
+                <p class="text-[11px] text-slate-300" id="zoom-caption">Klik di luar gambar untuk menutup</p>
+            </div>
+        </div>
+
+        <!-- MODAL VERIFIKASI PIN GURU -->
+        <div id="modal-pin-auth" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-4">
+            <div class="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5 text-center relative overflow-hidden">
+                <div class="w-16 h-16 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center text-3xl mx-auto shadow-inner">
+                    🔐
+                </div>
+                <div>
+                    <h4 class="text-xl font-bold text-slate-900">Dashboard Guru Terkunci</h4>
+                    <p class="text-xs text-slate-500 mt-1">Masukkan PIN Keamanan Guru untuk mengakses penilaian & data siswa.</p>
+                </div>
+
+                <div class="space-y-3">
+                    <input type="password" id="input-teacher-pin" maxlength="8" placeholder="Masukkan PIN Keamanan Guru..." class="w-full px-4 py-3 text-center text-lg font-bold tracking-widest border-2 border-slate-300 rounded-2xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 focus:outline-none bg-slate-50 text-slate-900">
+                    <p id="pin-error-msg" class="text-xs text-red-600 font-bold hidden flex items-center justify-center gap-1">
+                        <span>⚠️</span> PIN salah! Silahkan coba lagi.
+                    </p>
+                </div>
+
+                <div class="flex gap-2 pt-2">
+                    <button onclick="closePinModal()" type="button" class="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition text-xs">
+                        Batal
+                    </button>
+                    <button onclick="verifyTeacherPin()" type="button" class="w-1/2 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition text-xs shadow-md touch-manipulation">
+                        Buka Dashboard
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL KONFIRMASI HAPUS SUBMISI -->
+        <div id="modal-delete-confirm" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
+            <div class="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl border border-slate-200">
+                <div class="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-2xl mx-auto">
+                    🗑️
+                </div>
+                <div>
+                    <h4 class="text-base font-bold text-slate-900">Hapus Submisi Siswa?</h4>
+                    <p class="text-xs text-slate-500 mt-1" id="delete-confirm-text">Apakah Anda yakin ingin menghapus submisi ini?</p>
+                </div>
+                <div class="bg-red-50 p-2.5 rounded-xl border border-red-200 text-[11px] text-red-900 text-left">
+                    ⚠️ Tindakan ini akan menghapus data jawaban, rekaman suara, dan karya siswa secara permanen dari daftar.
+                </div>
+                <div class="flex gap-2 pt-1">
+                    <button onclick="closeDeleteModal()" type="button" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition text-xs">
+                        Batal
+                    </button>
+                    <button onclick="executeDeleteSubmission()" type="button" class="w-1/2 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition text-xs shadow-md touch-manipulation">
+                        Ya, Hapus
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 text-slate-400 text-xs py-6 mt-12 border-t border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 text-center space-y-1.5">
+            <p>© Modul PJJ Pendidikan Pancasila Kelas VI SD/MI • Kebahagiaan Bersama</p>
+            <p class="text-slate-500 text-[11px]">Dirancang untuk Kemudahan Akses Pembelajaran Jarak Jauh Berbasis Digital (Mobile, Tablet, Laptop Friendly)</p>
+        </div>
+    </footer>
+
+    <script>
+        // State Variables & Global Submissions Registry
+        window.submissions = window.submissions || [];
+        let selectedTasks = [];
+        let activeTabTask = null;
+        let isRecording = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let recordedAudioUrl = null;
+        let uploadedFiles = {}; 
+        let currentGradingSubId = null;
+
+        let isTeacherUnlocked = false;
+        const TEACHER_PIN = "1234";
+        let subIdToDelete = null;
+
+        let chartTaskDist = null;
+        let chartReflectMatrix = null;
+
+        // Cloud Helper Operations
+        async function saveSubmissionToCloud(subData) {
+            if (window.db && window.firestoreDocs) {
+                try {
+                    const { doc, setDoc } = window.firestoreDocs;
+                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'submissions', subData.id);
+                    await setDoc(docRef, subData);
+                } catch (e) {
+                    console.error("Cloud write failed:", e);
+                }
+            }
+        }
+
+        async function updateGradeInCloud(subId, updatePayload) {
+            if (window.db && window.firestoreDocs) {
+                try {
+                    const { doc, setDoc } = window.firestoreDocs;
+                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'submissions', subId);
+                    await setDoc(docRef, updatePayload, { merge: true });
+                } catch (e) {
+                    console.error("Cloud grade update failed:", e);
+                }
+            }
+        }
+
+        async function deleteSubmissionFromCloud(subId) {
+            if (window.db && window.firestoreDocs) {
+                try {
+                    const { doc, deleteDoc } = window.firestoreDocs;
+                    const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'submissions', subId);
+                    await deleteDoc(docRef);
+                } catch (e) {
+                    console.error("Cloud deletion failed:", e);
+                }
+            }
+        }
+
+        // Toast Notification Helper
+        function showToast(message, icon = '✅') {
+            const toast = document.getElementById('toast-notification');
+            document.getElementById('toast-message').innerText = message;
+            document.getElementById('toast-icon').innerText = icon;
+            toast.classList.remove('translate-x-full');
+            setTimeout(() => {
+                toast.classList.add('translate-x-full');
+            }, 3000);
+        }
+
+        // Smooth Scroll Helper
+        function scrollToSection(id) {
+            const element = document.getElementById(id);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+
+        // Teacher Dashboard Security & Access Controls
+        function accessTeacherDashboard() {
+            if (isTeacherUnlocked) {
+                const dash = document.getElementById('analytics-dashboard');
+                dash.classList.remove('hidden');
+                dash.scrollIntoView({ behavior: 'smooth' });
+            } else {
+                openPinModal();
+            }
+        }
+
+        function openPinModal() {
+            const inputPin = document.getElementById('input-teacher-pin');
+            if (inputPin) inputPin.value = '';
+            document.getElementById('pin-error-msg')?.classList.add('hidden');
+            document.getElementById('modal-pin-auth').classList.remove('hidden');
+        }
+
+        function closePinModal() {
+            document.getElementById('modal-pin-auth').classList.add('hidden');
+        }
+
+        function verifyTeacherPin() {
+            const inputPin = document.getElementById('input-teacher-pin').value;
+            if (inputPin === TEACHER_PIN) {
+                isTeacherUnlocked = true;
+                closePinModal();
+                
+                const dash = document.getElementById('analytics-dashboard');
+                dash.classList.remove('hidden');
+                dash.scrollIntoView({ behavior: 'smooth' });
+                
+                showToast('Dashboard Guru Berhasil Terbuka!', '🔓');
+            } else {
+                document.getElementById('pin-error-msg')?.classList.remove('hidden');
+            }
+        }
+
+        function lockTeacherDashboard() {
+            isTeacherUnlocked = false;
+            document.getElementById('analytics-dashboard').classList.add('hidden');
+            showToast('Dashboard Guru telah terkunci kembali.', '🔒');
+        }
+
+        // Toggle Teacher Dashboard Tabs
+        function switchTeacherDashboardTab(tab) {
+            const btnSubmisi = document.getElementById('btn-tab-submisi');
+            const btnGrafik = document.getElementById('btn-tab-grafik');
+            const viewSubmisi = document.getElementById('teacher-view-submisi');
+            const viewGrafik = document.getElementById('teacher-view-grafik');
+
+            if (tab === 'submisi') {
+                btnSubmisi.className = "px-3.5 py-2 bg-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-sm transition flex-1 sm:flex-none text-center";
+                btnGrafik.className = "px-3.5 py-2 bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-200 transition flex-1 sm:flex-none text-center";
+                viewSubmisi.classList.remove('hidden');
+                viewGrafik.classList.add('hidden');
+            } else {
+                btnGrafik.className = "px-3.5 py-2 bg-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-sm transition flex-1 sm:flex-none text-center";
+                btnSubmisi.className = "px-3.5 py-2 bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-200 transition flex-1 sm:flex-none text-center";
+                viewGrafik.classList.remove('hidden');
+                viewSubmisi.classList.add('hidden');
+                updateAnalyticsCharts();
+            }
+        }
+
+        // Handle Task Selection (Select Exactly 3 Tasks)
+        function handleTaskSelection(taskNum) {
+            const checkbox = document.getElementById(`check-task-${taskNum}`);
+            
+            if (checkbox.checked) {
+                if (selectedTasks.length >= 3) {
+                    checkbox.checked = false;
+                    showToast('Kamu hanya bisa memilih MAKSIMAL 3 Sila!', '⚠️');
+                    return;
+                }
+                if (!selectedTasks.includes(taskNum)) {
+                    selectedTasks.push(taskNum);
+                }
+            } else {
+                selectedTasks = selectedTasks.filter(num => num !== taskNum);
+            }
+
+            selectedTasks.sort((a, b) => a - b);
+            updateSelectionUI();
+        }
+
+        // Update UI dynamically based on selectedTasks array
+        function updateSelectionUI() {
+            const counter = document.getElementById('selection-counter');
+            const submitBtn = document.getElementById('btn-submit-lkpd');
+            const guidanceText = document.getElementById('submit-guidance-text');
+            const statusBadge = document.getElementById('simulator-status-badge');
+            const tabBar = document.getElementById('active-task-tab-bar');
+            const emptyState = document.getElementById('placeholder-empty-state');
+
+            counter.innerText = `Terpilih: ${selectedTasks.length} / 3 Sila`;
+            document.querySelectorAll('.task-content').forEach(el => el.classList.add('hidden'));
+
+            if (selectedTasks.length === 3) {
+                submitBtn.disabled = false;
+                submitBtn.className = "px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition flex items-center gap-2 text-xs sm:text-sm cursor-pointer w-full sm:w-auto justify-center touch-manipulation active:scale-95";
+                guidanceText.innerText = "✅ Tepat 3 Sila telah dipilih! Silahkan tonton videonya di YouTube dan isi pertanyaan 5W1H ketiga tugas lalu klik Kirim.";
+                statusBadge.innerText = "Status: 3 Sila Terpilih (Siap Dikerjakan)";
+                
+                emptyState.classList.add('hidden');
+                tabBar.classList.remove('hidden');
+
+                if (!selectedTasks.includes(activeTabTask)) {
+                    activeTabTask = selectedTasks[0];
+                }
+
+                renderActiveTabs();
+                showTaskContent(activeTabTask);
+
+            } else {
+                submitBtn.disabled = true;
+                submitBtn.className = "px-6 py-3.5 bg-slate-300 text-slate-500 font-bold rounded-xl cursor-not-allowed transition flex items-center gap-2 text-xs sm:text-sm shadow-none w-full sm:w-auto justify-center touch-manipulation";
+                guidanceText.innerText = `*Silahkan centang ${3 - selectedTasks.length} Sila lagi untuk membuka lembar kerja interaktif.`;
+                statusBadge.innerText = `Status: Tahap Pemilihan (${selectedTasks.length}/3 Terpilih)`;
+                
+                emptyState.classList.remove('hidden');
+                tabBar.classList.add('hidden');
+            }
+        }
+
+        // Render Tab Navigation Bar for Selected Tasks
+        function renderActiveTabs() {
+            const tabBar = document.getElementById('active-task-tab-bar');
+            tabBar.innerHTML = '';
+            
+            const silaNames = {
+                1: 'Sila 1: Toleransi Beragama',
+                2: 'Sila 2: Anti-Bullying',
+                3: 'Sila 3: Keanekaragaman',
+                4: 'Sila 4: Musyawarah',
+                5: 'Sila 5: Gotong Royong'
+            };
+
+            selectedTasks.forEach(taskNum => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                const isActive = taskNum === activeTabTask;
+                btn.className = `px-3.5 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 touch-manipulation ${
+                    isActive 
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-sm' 
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`;
+                btn.innerHTML = `<span>📌</span> ${silaNames[taskNum]}`;
+                btn.onclick = () => showTaskContent(taskNum);
+                tabBar.appendChild(btn);
+            });
+        }
+
+        // Display Active Task Content Workspace
+        function showTaskContent(taskNum) {
+            activeTabTask = taskNum;
+            document.querySelectorAll('.task-content').forEach(el => el.classList.add('hidden'));
+            
+            const targetContent = document.getElementById(`content-task-${taskNum}`);
+            if (targetContent) {
+                targetContent.classList.remove('hidden');
+            }
+            renderActiveTabs();
+        }
+
+        // Browser Voice Recorder & Audio Handler
+        async function toggleVoiceSim() {
+            const btn = document.getElementById('btn-voice-sim');
+            const label = document.getElementById('voice-sim-label');
+            const previewBox = document.getElementById('voice-audio-preview');
+
+            if (!isRecording) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    let options = {};
+                    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) {
+                        if (MediaRecorder.isTypeSupported('audio/webm')) options.mimeType = 'audio/webm';
+                        else if (MediaRecorder.isTypeSupported('audio/mp4')) options.mimeType = 'audio/mp4';
+                    }
+
+                    mediaRecorder = new MediaRecorder(stream, options);
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = e => {
+                        if (e.data.size > 0) audioChunks.push(e.data);
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        const mime = options.mimeType || 'audio/wav';
+                        const audioBlob = new Blob(audioChunks, { type: mime });
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            recordedAudioUrl = reader.result;
+                            previewBox.innerHTML = `
+                                <div class="space-y-1">
+                                    <span class="text-[11px] font-bold text-slate-700 block">▶ Hasil Rekaman Voice Note Siswa:</span>
+                                    <audio controls src="${recordedAudioUrl}" class="w-full rounded-lg shadow-sm"></audio>
+                                </div>
+                            `;
+                            previewBox.classList.remove('hidden');
+                        };
+                        reader.readAsDataURL(audioBlob);
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    btn.className = "px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm animate-pulse touch-manipulation";
+                    label.innerText = '🔴 Merekam... (Klik untuk Selesai)';
+                    showToast('Perekaman suara sedang berjalan...');
+                } catch (err) {
+                    createMockAudioRecord();
+                }
+            } else {
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }
+                isRecording = false;
+                btn.className = "px-3.5 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-900 transition flex items-center gap-1.5 shadow-sm touch-manipulation";
+                label.innerText = '✅ Voice Note Terrekam (Putar / Rekam Ulang)';
+                showToast('Rekaman suara berhasil disimpan!');
+            }
+        }
+
+        function createMockAudioRecord() {
+            isRecording = false;
+            recordedAudioUrl = generateSampleWavDataUrl();
+            const previewBox = document.getElementById('voice-audio-preview');
+            previewBox.innerHTML = `
+                <div class="space-y-1">
+                    <span class="text-[11px] font-bold text-slate-700 block">▶ Hasil Rekaman Voice Note Siswa:</span>
+                    <audio controls src="${recordedAudioUrl}" class="w-full rounded-lg shadow-sm"></audio>
+                </div>
+            `;
+            previewBox.classList.remove('hidden');
+            document.getElementById('btn-voice-sim').className = "px-3.5 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-900 transition flex items-center gap-1.5 shadow-sm touch-manipulation";
+            document.getElementById('voice-sim-label').innerText = '✅ Voice Note Sample Terrekam';
+            showToast('Rekaman suara sampel berhasil dibuat!');
+        }
+
+        function generateSampleWavDataUrl() {
+            const sampleRate = 8000;
+            const duration = 2;
+            const numSamples = sampleRate * duration;
+            const headerByteLength = 44;
+            const buffer = new Uint8Array(headerByteLength + numSamples);
+
+            function writeString(offset, str) {
+                for (let i = 0; i < str.length; i++) buffer[offset + i] = str.charCodeAt(i);
+            }
+            function writeUint32(offset, val) {
+                buffer[offset] = val & 0xff;
+                buffer[offset + 1] = (val >> 8) & 0xff;
+                buffer[offset + 2] = (val >> 16) & 0xff;
+                buffer[offset + 3] = (val >> 24) & 0xff;
+            }
+            function writeUint16(offset, val) {
+                buffer[offset] = val & 0xff;
+                buffer[offset + 1] = (val >> 8) & 0xff;
+            }
+
+            writeString(0, 'RIFF');
+            writeUint32(4, 36 + numSamples);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            writeUint32(16, 16);
+            writeUint16(20, 1);
+            writeUint16(22, 1);
+            writeUint32(24, sampleRate);
+            writeUint32(28, sampleRate);
+            writeUint16(32, 1);
+            writeUint16(34, 8);
+            writeString(36, 'data');
+            writeUint32(40, numSamples);
+
+            for (let i = 0; i < numSamples; i++) {
+                const t = i / sampleRate;
+                const freq = 440 + Math.sin(t * 10) * 100;
+                buffer[headerByteLength + i] = Math.floor(128 + 127 * Math.sin(2 * Math.PI * freq * t));
+            }
+
+            let binary = '';
+            for (let i = 0; i < buffer.length; i++) {
+                binary += String.fromCharCode(buffer[i]);
+            }
+            return 'data:audio/wav;base64,' + btoa(binary);
+        }
+
+        function handleAudioFileUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    recordedAudioUrl = e.target.result;
+                    const previewBox = document.getElementById('voice-audio-preview');
+                    previewBox.innerHTML = `
+                        <div class="space-y-1">
+                            <span class="text-[11px] font-bold text-slate-700 block">▶ Berkas Audio Diunggah (${file.name}):</span>
+                            <audio controls src="${recordedAudioUrl}" class="w-full rounded-lg shadow-sm"></audio>
+                        </div>
+                    `;
+                    previewBox.classList.remove('hidden');
+                    showToast(`Berkas audio ${file.name} berhasil diunggah!`);
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // File Upload Handling
+        function handleFileUpload(event, taskNum) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    uploadedFiles[taskNum] = {
+                        name: file.name,
+                        dataUrl: e.target.result
+                    };
+                    const labelEl = document.getElementById(`file-upload-label-${taskNum}`);
+                    if (labelEl) labelEl.innerText = `✅ Berkas Terpilih: ${file.name}`;
+                    
+                    const previewImg = document.getElementById(`file-preview-img-${taskNum}`);
+                    const previewContainer = document.getElementById(`file-preview-container-${taskNum}`);
+                    if (previewImg && previewContainer && file.type.startsWith('image/')) {
+                        previewImg.src = e.target.result;
+                        previewContainer.classList.remove('hidden');
+                    }
+                    showToast(`File ${file.name} berhasil diunggah!`);
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Image Zoom Modal Handlers
+        function viewFullImage(src) {
+            const modal = document.getElementById('modal-image-zoom');
+            const img = document.getElementById('zoom-image-src');
+            if (modal && img) {
+                img.src = src;
+                modal.classList.remove('hidden');
+            }
+        }
+
+        function closeImageZoom() {
+            document.getElementById('modal-image-zoom')?.classList.add('hidden');
+        }
+
+        // Student Submission Logic
+        function submitLKPD() {
+            if (selectedTasks.length !== 3) {
+                showToast('Pilih 3 Sila terlebih dahulu!', '⚠️');
+                return;
+            }
+
+            const nama = document.getElementById('sim-nama').value.trim() || 'Siswa Anonim';
+            const absen = document.getElementById('sim-absen').value.trim() || '01';
+            const kelas = document.getElementById('sim-kelas').value;
+            const now = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            const timestampMs = Date.now();
+            const subId = `SUB-${timestampMs.toString().slice(-6)}`;
+
+            let answersObj = {};
+            selectedTasks.forEach(taskNum => {
+                answersObj[taskNum] = {
+                    apa: document.getElementById(`t${taskNum}-apa`)?.value || 'Telah dikerjakan dengan baik.',
+                    siapa: document.getElementById(`t${taskNum}-siapa`)?.value || 'Tokoh dalam materi.',
+                    dimana: document.getElementById(`t${taskNum}-dimana`)?.value || 'Lingkungan sekolah/rumah.',
+                    mengapa: document.getElementById(`t${taskNum}-mengapa`)?.value || 'Sesuai pengamalan nilai Pancasila.',
+                    bagaimana: document.getElementById(`t${taskNum}-bagaimana`)?.value || 'Menerapkan dalam kehidupan sehari-hari.'
+                };
+
+                if (taskNum === 1) {
+                    answersObj[taskNum].reflection = {
+                        s1: document.querySelector('input[name="s1"]:checked')?.value || 'Selalu',
+                        s2: document.querySelector('input[name="s2"]:checked')?.value || 'Selalu',
+                        s3: document.querySelector('input[name="s3"]:checked')?.value || 'Selalu',
+                        s4: document.querySelector('input[name="s4"]:checked')?.value || 'Sering'
+                    };
+                }
+
+                if (taskNum === 2 && recordedAudioUrl) {
+                    answersObj[taskNum].voiceNoteUrl = recordedAudioUrl;
+                }
+
+                if ((taskNum === 3 || taskNum === 5) && uploadedFiles[taskNum]) {
+                    answersObj[taskNum].fileUrl = uploadedFiles[taskNum].dataUrl;
+                    answersObj[taskNum].fileName = uploadedFiles[taskNum].name;
+                }
+
+                if (taskNum === 5) {
+                    answersObj[taskNum].karya = document.getElementById('t5-karya')?.value || '';
+                }
+            });
+
+            const newSubmission = {
+                id: subId,
+                nama: nama,
+                absen: absen,
+                kelas: kelas,
+                timestamp: `${now} WIB`,
+                createdAt: timestampMs,
+                selectedTasks: [...selectedTasks],
+                answers: answersObj,
+                graded: false,
+                totalScore: 0,
+                gradesBreakdown: {},
+                teacherNote: ''
+            };
+
+            window.submissions = (window.submissions || []).filter(s => s.id !== subId);
+            window.submissions.unshift(newSubmission);
+            
+            saveSubmissionToCloud(newSubmission);
+            renderTeacherTable();
+
+            // Render Student Confirmation Receipt Box
+            const resultContainer = document.getElementById('submission-result');
+            const resultSummary = document.getElementById('result-summary');
+            document.getElementById('sim-timestamp').innerText = `Waktu Kirim: ${now} WIB`;
+
+            let detail = `<div class="pb-2 border-b border-emerald-200"><strong>Data Peserta:</strong> ${nama} (Absen ${absen}) - ${kelas}</div>`;
+            detail += `<div class="pt-1 font-bold text-emerald-950">Rekapitulasi Tiga Sila Terpilih:</div><div class="space-y-2.5 mt-2">`;
+
+            selectedTasks.forEach(taskNum => {
+                let ans = answersObj[taskNum];
+                detail += `
+                    <div class="bg-white p-3 rounded-xl border border-emerald-200">
+                        <strong class="text-amber-800 block mb-1">📌 Tugas Sila ke-${taskNum}</strong>
+                        <div class="grid grid-cols-1 gap-1 text-[11px] text-slate-700">
+                            <div>• <strong>Apa:</strong> ${ans.apa}</div>
+                            <div>• <strong>Siapa:</strong> ${ans.siapa}</div>
+                            <div>• <strong>Di mana:</strong> ${ans.dimana}</div>
+                            <div>• <strong>Mengapa:</strong> ${ans.mengapa}</div>
+                            <div>• <strong>Bagaimana:</strong> ${ans.bagaimana}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            detail += `</div>`;
+            resultSummary.innerHTML = detail;
+            resultContainer.classList.remove('hidden');
+            resultContainer.scrollIntoView({ behavior: 'smooth' });
+
+            showToast('Jawaban 3 Sila berhasil tersimpan secara realtime!');
+        }
+
+        // Render Submissions Table in Teacher Dashboard
+        function renderTeacherTable() {
+            const tbody = document.getElementById('table-submissions-body');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            const currentSubmissions = window.submissions || [];
+            let total = currentSubmissions.length;
+            let pending = 0;
+            let completed = 0;
+            let sumScore = 0;
+
+            if (currentSubmissions.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="p-8 text-center text-slate-400">
+                            <span class="text-3xl block mb-1">📭</span>
+                            Belum ada submisi jawaban siswa.
+                        </td>
+                    </tr>
+                `;
+            }
+
+            currentSubmissions.forEach((sub) => {
+                if (sub.graded) {
+                    completed++;
+                    sumScore += sub.totalScore;
+                } else {
+                    pending++;
+                }
+
+                let mediaBadges = [];
+                if (sub.selectedTasks) {
+                    sub.selectedTasks.forEach(t => {
+                        if (sub.answers && sub.answers[t]?.voiceNoteUrl) mediaBadges.push('🎙️ Audio');
+                        if (sub.answers && sub.answers[t]?.fileUrl) mediaBadges.push('🖼️ Gambar Karya');
+                    });
+                }
+                let mediaText = mediaBadges.length > 0 ? mediaBadges.join(', ') : '📝 Teks Refleksi';
+
+                let statusBadge = sub.graded
+                    ? `<span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-full text-[10px] border border-emerald-300">✅ ${sub.totalScore} / 100</span>`
+                    : `<span class="px-2.5 py-1 bg-amber-100 text-amber-800 font-extrabold rounded-full text-[10px] border border-amber-300">⏳ Belum Dinilai</span>`;
+
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
+                tr.innerHTML = `
+                    <td class="p-3 sm:p-3.5 font-mono font-bold text-slate-800">${sub.id}<br><span class="text-[10px] font-normal text-slate-500">${sub.timestamp}</span></td>
+                    <td class="p-3 sm:p-3.5 font-bold text-slate-900">${sub.nama}</td>
+                    <td class="p-3 sm:p-3.5">${sub.kelas} <span class="text-slate-400">(Absen ${sub.absen})</span></td>
+                    <td class="p-3 sm:p-3.5">
+                        <div class="flex flex-wrap gap-1">
+                            ${(sub.selectedTasks || []).map(t => `<span class="px-2 py-0.5 bg-amber-100 text-amber-900 font-bold rounded text-[10px]">Sila ${t}</span>`).join('')}
+                        </div>
+                    </td>
+                    <td class="p-3 sm:p-3.5 text-slate-600 font-medium">${mediaText}</td>
+                    <td class="p-3 sm:p-3.5 text-center">${statusBadge}</td>
+                    <td class="p-3 sm:p-3.5 text-center">
+                        <div class="flex items-center justify-center gap-1.5">
+                            <button onclick="openGradingModal('${sub.id}')" type="button" title="Periksa Jawaban" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition text-[11px] shadow-sm flex items-center gap-1 touch-manipulation">
+                                <span>🔍</span> ${sub.graded ? 'Edit' : 'Nilai'}
+                            </button>
+                            <button onclick="confirmDeleteSubmission('${sub.id}')" type="button" title="Hapus Submisi Ganda/Salah" class="px-2.5 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 font-bold rounded-lg transition text-[11px] shadow-sm flex items-center gap-1 touch-manipulation">
+                                <span>🗑️</span> Hapus
+                            </button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('stat-total-submisi').innerText = `${total} Siswa`;
+            document.getElementById('stat-pending-submisi').innerText = `${pending} Siswa`;
+            document.getElementById('stat-completed-submisi').innerText = `${completed} Siswa`;
+            document.getElementById('submission-count-badge').innerText = total;
+
+            let avg = completed > 0 ? (sumScore / completed).toFixed(1) : '0.0';
+            document.getElementById('stat-avg-score').innerText = `${avg} / 100`;
+        }
+
+        // Open Teacher Grading Modal
+        function openGradingModal(subId) {
+            if (!isTeacherUnlocked) {
+                openPinModal();
+                return;
+            }
+            currentGradingSubId = subId;
+            const sub = (window.submissions || []).find(s => s.id === subId);
+            if (!sub) return;
+
+            document.getElementById('modal-student-name').innerText = `Lembar Jawaban: ${sub.nama}`;
+            document.getElementById('modal-student-meta').innerText = `Kelas ${sub.kelas} • Absen ${sub.absen} • Waktu Kirim: ${sub.timestamp} • ID: ${sub.id}`;
+
+            const content = document.getElementById('modal-grading-content');
+            content.innerHTML = '';
+
+            let defaultBreakdown = sub.gradesBreakdown || {};
+
+            (sub.selectedTasks || []).forEach((taskNum, index) => {
+                const ans = sub.answers ? sub.answers[taskNum] : null;
+                if (!ans) return;
+
+                const card = document.createElement('div');
+                card.className = "bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200 space-y-3.5";
+
+                let mediaElement = '';
+                if (ans.voiceNoteUrl) {
+                    mediaElement += `
+                        <div class="bg-red-50 p-3 rounded-xl border border-red-200 space-y-1 mt-2">
+                            <span class="font-bold text-red-900 text-xs flex items-center gap-1.5">🎙️ Voice Note Refleksi Lisan Siswa:</span>
+                            <audio controls src="${ans.voiceNoteUrl}" class="w-full rounded-lg shadow-sm"></audio>
+                        </div>
+                    `;
+                }
+
+                if (ans.fileUrl) {
+                    mediaElement += `
+                        <div class="bg-emerald-50 p-3 rounded-xl border border-emerald-200 space-y-2 mt-2">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold text-emerald-900 text-xs flex items-center gap-1.5">🖼️ Gambar Karya / Poster Siswa:</span>
+                                <button onclick="viewFullImage('${ans.fileUrl}')" type="button" class="text-xs text-emerald-700 hover:text-emerald-900 font-bold underline">🔍 Perbesar Gambar</button>
+                            </div>
+                            <img src="${ans.fileUrl}" alt="Karya Siswa" class="max-h-52 rounded-lg border border-emerald-300 shadow-sm mx-auto cursor-pointer" onclick="viewFullImage('${ans.fileUrl}')">
+                        </div>
+                    `;
+                }
+
+                let scoreKey = `t${taskNum}_5w1h`;
+                let currentItemScore = defaultBreakdown[scoreKey] !== undefined ? defaultBreakdown[scoreKey] : 20;
+
+                card.innerHTML = `
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                        <h5 class="font-bold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                            <span class="w-5 h-5 rounded-full bg-amber-500 text-white text-[11px] flex items-center justify-center font-bold">${index + 1}</span>
+                            TUGAS SILA KE-${taskNum}
+                        </h5>
+                        <div class="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-300">
+                            <label class="font-bold text-slate-700 text-xs">Nilai Poin (0-20):</label>
+                            <input type="number" min="0" max="20" value="${currentItemScore}" data-key="${scoreKey}" onchange="calculateGradingTotal()" class="item-score-input w-16 px-2 py-1 border border-slate-300 rounded text-center font-extrabold text-indigo-700 focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 bg-white p-3 rounded-xl border border-slate-200 text-[11px] text-slate-800">
+                        <div><strong>1. APA:</strong> <p class="text-slate-600 mt-0.5">${ans.apa || '-'}</p></div>
+                        <div><strong>2. SIAPA:</strong> <p class="text-slate-600 mt-0.5">${ans.siapa || '-'}</p></div>
+                        <div><strong>3. DI MANA:</strong> <p class="text-slate-600 mt-0.5">${ans.dimana || '-'}</p></div>
+                        <div><strong>4. MENGAPA:</strong> <p class="text-slate-600 mt-0.5">${ans.mengapa || '-'}</p></div>
+                        <div class="md:col-span-2"><strong>5. BAGAIMANA:</strong> <p class="text-slate-600 mt-0.5">${ans.bagaimana || '-'}</p></div>
+                    </div>
+
+                    ${ans.karya ? `<div class="bg-sky-50 p-3 rounded-xl border border-sky-200"><strong>Karya Tulis/Puisi:</strong><p class="whitespace-pre-line text-slate-700 italic mt-1">${ans.karya}</p></div>` : ''}
+                    ${mediaElement}
+                `;
+
+                content.appendChild(card);
+            });
+
+            const teacherNoteBox = document.createElement('div');
+            teacherNoteBox.className = "bg-amber-50/80 p-4 rounded-2xl border border-amber-200 space-y-2";
+            teacherNoteBox.innerHTML = `
+                <label class="block font-bold text-amber-950 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                    <span>💬</span> Catatan & Umpan Balik Guru untuk Siswa:
+                </label>
+                <textarea id="modal-teacher-note" rows="3" class="w-full p-3 border border-amber-300 rounded-xl focus:ring-2 focus:ring-amber-500 bg-white text-xs font-medium text-slate-800" placeholder="Ketik apresiasi, catatan perbaikan, atau saran untuk siswa di sini...">${sub.teacherNote || ''}</textarea>
+            `;
+            content.appendChild(teacherNoteBox);
+
+            calculateGradingTotal();
+            document.getElementById('modal-grading').classList.remove('hidden');
+        }
+
+        function calculateGradingTotal() {
+            const inputs = document.querySelectorAll('.item-score-input');
+            let total = 0;
+            inputs.forEach(input => {
+                let val = parseInt(input.value) || 0;
+                if (val < 0) val = 0;
+                if (val > 20) val = 20;
+                input.value = val;
+                total += val;
+            });
+
+            const scoreEl = document.getElementById('modal-calculated-score');
+            const predicateEl = document.getElementById('modal-score-predicate');
+            if (scoreEl) scoreEl.innerText = total;
+
+            if (predicateEl) {
+                if (total >= 88) {
+                    predicateEl.innerText = "A (Sangat Baik)";
+                    predicateEl.className = "px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold text-[10px] rounded-md border border-emerald-300";
+                } else if (total >= 75) {
+                    predicateEl.innerText = "B (Baik)";
+                    predicateEl.className = "px-2 py-0.5 bg-blue-100 text-blue-800 font-bold text-[10px] rounded-md border border-blue-300";
+                } else if (total >= 60) {
+                    predicateEl.innerText = "C (Cukup)";
+                    predicateEl.className = "px-2 py-0.5 bg-amber-100 text-amber-800 font-bold text-[10px] rounded-md border border-amber-300";
+                } else {
+                    predicateEl.innerText = "D (Perlu Bimbingan)";
+                    predicateEl.className = "px-2 py-0.5 bg-red-100 text-red-800 font-bold text-[10px] rounded-md border border-red-300";
+                }
+            }
+        }
+
+        // Save Teacher Evaluation
+        function saveStudentGrade() {
+            if (!currentGradingSubId) return;
+            const sub = (window.submissions || []).find(s => s.id === currentGradingSubId);
+            if (!sub) return;
+
+            const inputs = document.querySelectorAll('.item-score-input');
+            let breakdown = {};
+            inputs.forEach(input => {
+                let key = input.getAttribute('data-key');
+                breakdown[key] = parseInt(input.value) || 0;
+            });
+
+            const finalScore = parseInt(document.getElementById('modal-calculated-score').innerText) || 0;
+            const teacherNote = document.getElementById('modal-teacher-note').value.trim();
+
+            sub.graded = true;
+            sub.totalScore = finalScore;
+            sub.gradesBreakdown = breakdown;
+            sub.teacherNote = teacherNote;
+
+            updateGradeInCloud(sub.id, {
+                graded: true,
+                totalScore: finalScore,
+                gradesBreakdown: breakdown,
+                teacherNote: teacherNote
+            });
+
+            renderTeacherTable();
+            closeGradingModal();
+            showToast(`Penilaian untuk ${sub.nama} tersimpan di Cloud (Nilai: ${finalScore})!`);
+        }
+
+        function closeGradingModal() {
+            document.getElementById('modal-grading').classList.add('hidden');
+            currentGradingSubId = null;
+        }
+
+        // Confirm & Execute Deletion
+        function confirmDeleteSubmission(subId) {
+            if (!isTeacherUnlocked) {
+                openPinModal();
+                return;
+            }
+            subIdToDelete = subId;
+            const sub = (window.submissions || []).find(s => s.id === subId);
+            const textEl = document.getElementById('delete-confirm-text');
+            if (sub && textEl) {
+                textEl.innerText = `Apakah Anda yakin ingin menghapus submisi dari ${sub.nama} (${sub.kelas}, Absen ${sub.absen})?`;
+            }
+            document.getElementById('modal-delete-confirm').classList.remove('hidden');
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('modal-delete-confirm').classList.add('hidden');
+            subIdToDelete = null;
+        }
+
+        function executeDeleteSubmission() {
+            if (!subIdToDelete) return;
+            const targetId = subIdToDelete;
+            window.submissions = (window.submissions || []).filter(s => s.id !== targetId);
+            
+            deleteSubmissionFromCloud(targetId);
+
+            renderTeacherTable();
+            closeDeleteModal();
+            showToast('Submisi siswa berhasil dihapus!', '🗑️');
+        }
+
+        // Dynamic Analytics Charts
+        function updateAnalyticsCharts() {
+            const counts = [0, 0, 0, 0, 0];
+            (window.submissions || []).forEach(sub => {
+                if (sub.selectedTasks) {
+                    sub.selectedTasks.forEach(taskNum => {
+                        if (taskNum >= 1 && taskNum <= 5) {
+                            counts[taskNum - 1]++;
+                        }
+                    });
+                }
+            });
+
+            if (chartTaskDist) {
+                chartTaskDist.data.datasets[0].data = counts;
+                chartTaskDist.update();
+            }
+        }
+
+        // Initialize Charts & App on Load
+        document.addEventListener('DOMContentLoaded', function() {
+            renderTeacherTable();
+
+            document.getElementById('input-teacher-pin')?.addEventListener('keyup', function(e) {
+                if (e.key === 'Enter') {
+                    verifyTeacherPin();
+                }
+            });
+
+            // Chart 1: Task Selection Distribution
+            const ctxTask = document.getElementById('chart-task-distribution')?.getContext('2d');
+            if (ctxTask) {
+                chartTaskDist = new Chart(ctxTask, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Sila 1', 'Sila 2', 'Sila 3', 'Sila 4', 'Sila 5'],
+                        datasets: [{
+                            label: 'Jumlah Pemilihan Siswa',
+                            data: [1, 1, 1, 0, 0],
+                            backgroundColor: ['#4f46e5', '#dc2626', '#16a34a', '#ea580c', '#0284c7'],
+                            borderRadius: 6
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                        }
+                    }
+                });
+            }
+
+            // Chart 2: Sila 1 Reflection Habits Matrix
+            const ctxReflect = document.getElementById('chart-reflection-matrix')?.getContext('2d');
+            if (ctxReflect) {
+                chartReflectMatrix = new Chart(ctxReflect, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Berdoa', 'Menghormati', 'Tidak Mengganggu', 'Berteman'],
+                        datasets: [
+                            { label: 'Selalu', data: [85, 90, 88, 82], backgroundColor: '#16a34a' },
+                            { label: 'Sering', data: [12, 8, 10, 15], backgroundColor: '#eab308' },
+                            { label: 'Kadang/Jarang', data: [3, 2, 2, 3], backgroundColor: '#cbd5e1' }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: { stacked: true },
+                            y: { stacked: true, max: 100, ticks: { callback: function(v) { return v + '%'; } } }
+                        },
+                        plugins: { legend: { position: 'bottom' } }
+                    }
+                });
+            }
+        });
+
+        window.renderTeacherTable = renderTeacherTable;
+        window.updateAnalyticsCharts = updateAnalyticsCharts;
+        window.submissions = submissions;
+    </script>
+</body>
+</html>
+```
